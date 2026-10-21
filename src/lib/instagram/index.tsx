@@ -2,7 +2,6 @@ import { BadRequest } from "@/lib/exceptions";
 import { fetchFromGraphQL } from "./scrapers/graphql";
 import { getTranslations } from "next-intl/server";
 import { redenv } from "@/lib/redenv";
-import { AxiosError } from "axios";
 import { IG_URL_RESOLVE_API } from "@/constants";
 
 export const getPostId = async (url: string) => {
@@ -53,22 +52,18 @@ export const getPostId = async (url: string) => {
       if (KNOWN_USERS[username]) {
         postId = KNOWN_USERS[username];
       } else {
+        const userIdRegex = /"profile_id":"(\d+)"/;
         try {
           const { default: axios } = await import("axios");
-          const env = await redenv.load();
-          const res = await axios.get(
-            `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
-            {
-              headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
-                "X-IG-App-ID": "936619743392459",
-                Cookie: env.IG_COOKIE,
-              },
+          const res = await axios.get(`https://www.instagram.com/${username}`, {
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
             },
-          );
-          postId = res.data?.data?.user?.id || username;
+          });
+          postId = res.data?.match(userIdRegex)?.[1] || username;
         } catch (err) {
+          console.log(err);
           postId = username;
         }
       }
@@ -125,6 +120,7 @@ export const fetchInstaContentJson = async (
   }
 
   const { id: postId, type } = await getPostId(finalUrl);
+
   const apiJson = await fetchFromGraphQL(postId, finalUrl, timeout, type);
   if (apiJson) return apiJson;
 

@@ -35,6 +35,7 @@ import {
 import { useEffect, useState } from "react";
 import TrustpilotReview from "@/components/trustpilot-review-button";
 import { useTranslations } from "next-intl";
+import Image from "next/image";
 
 const GlobalResultView = ({
   data,
@@ -101,7 +102,7 @@ const GlobalResultView = ({
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      <BetterImage
+                      <Image
                         className="rounded-full w-8 h-8 border border-neutral-600"
                         alt={data?.owner?.name}
                         src={data?.owner?.profile_pic}

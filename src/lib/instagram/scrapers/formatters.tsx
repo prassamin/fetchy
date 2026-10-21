@@ -14,6 +14,7 @@ import {
   InstagramStoryResponse,
   Owner,
 } from "@/types/api/downloader";
+import fs from "fs";
 
 export const formatGraphqlJson = (json: any, type: InstagramContentType) => {
   if (type === "post" || type === "reel") {
@@ -25,8 +26,10 @@ export const formatGraphqlJson = (json: any, type: InstagramContentType) => {
     return postAndReelFormatter(json);
   }
 
-  if (type === "highlight" || type === "story") return highlightFormatter(json);
+  if (type === "highlight") return highlightFormatter(json);
 
+  if (type === "story") return storyFormatter(json);
+  
   if (json?.data?.xdt_api__v1__media__shortcode__web_info?.items?.[0]) {
     return formatWebInfoMedia(
       json.data.xdt_api__v1__media__shortcode__web_info.items[0]
@@ -379,11 +382,131 @@ const postAndReelFormatter = (json: any) => {
 /**
  * @private
  */
-const highlightFormatter = (json: any) => {
+const storyFormatter = (json: any): InstagramStoryResponse | null => {
+  if (!json?.data) return null;
+
+  // Support both reels_media array structure and legacy connection edges
   const data =
-    json?.data?.xdt_api__v1__feed__reels_media__connection?.edges?.[0]?.node;
+    json?.data?.xdt_api__v1__feed__reels_media?.reels_media?.[0] ||
+    json?.data?.xdt_api__v1__feed__reels_media__connection?.edges?.[0]?.node ||
+    json?.data?.xdt_api__v1__feed__reels_media?.edges?.[0]?.node;
 
   if (!data) {
+    return null;
+  }
+
+  const user = data.user || {};
+  const owner: Owner = {
+    id: String(user.id || user.pk || data.id || ""),
+    name: user.full_name || user.username || "",
+    username: user.username || "",
+    profile_pic: user.profile_pic_url || user.profile_pic || "",
+    profile_url: user.username
+      ? `https://www.instagram.com/${user.username}/`
+      : "",
+  };
+
+  const firstCandidate =
+    data.items?.[0]?.image_versions2?.candidates?.[0]?.url || null;
+
+  const contentInfo: InstagramStoryResponse = {
+    id: String(data.id || owner.id),
+    owner,
+    type: "story",
+    thumbnail: firstCandidate,
+    stories: [],
+  };
+
+  const items = Array.isArray(data.items) ? data.items : [];
+
+  for (const item of items) {
+    const imageVersions = item?.image_versions2?.candidates;
+
+    // Pick best image candidate by largest resolution area (width * height)
+    const bestImageCandidate =
+      Array.isArray(imageVersions) && imageVersions.length > 0
+        ? imageVersions.reduce((best: any, cand: any) => {
+            const bestArea = (best?.width ?? 0) * (best?.height ?? 0);
+            const candArea = (cand?.width ?? 0) * (cand?.height ?? 0);
+            return candArea > bestArea ? cand : best;
+          }, imageVersions[0])
+        : null;
+
+    const bestImageUrl: string | null = bestImageCandidate?.url ?? null;
+    const isVideo =
+      item?.media_type === 2 ||
+      !!(item?.video_versions && item.video_versions.length > 0) ||
+      !!item?.video_dash_manifest;
+
+    const resources: InstagramResource[] = [];
+
+    // Image Resource (High quality poster / still photo)
+    if (bestImageUrl) {
+      resources.push({
+        id: _generateRandomId(),
+        filename: getIGImageFileName(
+          `${item?.id || item?.pk}_${bestImageCandidate?.width}x${bestImageCandidate?.height}`
+        ),
+        type: "image",
+        mime_type: "image/jpg",
+        has_audio: false,
+        width: bestImageCandidate?.width,
+        height: bestImageCandidate?.height,
+        baseURL: bestImageUrl,
+        thumbnail: bestImageUrl,
+      });
+    }
+
+    // Standard Progressive MP4 Video (if video)
+    const standardVideo = item?.video_versions?.[0]?.url;
+    if (standardVideo) {
+      const vidWidth = item?.original_width || item?.video_versions?.[0]?.width;
+      const vidHeight =
+        item?.original_height || item?.video_versions?.[0]?.height;
+      resources.push({
+        id: _generateRandomId(),
+        filename: getIGVideoFileName(
+          `${item?.id || item?.pk}_${vidWidth}x${vidHeight}`
+        ),
+        type: "video",
+        mime_type: "video/mp4",
+        quality: vidWidth ? `${vidWidth}p` : "720p",
+        has_audio: item?.has_audio !== false,
+        width: vidWidth,
+        height: vidHeight,
+        baseURL: standardVideo,
+        thumbnail: bestImageUrl || "",
+      });
+    }
+
+    // DASH Manifest Representations (1080p, 720p, 540p, 360p, and Audio)
+    if (item?.video_dash_manifest) {
+      const dashResources = parseDashManifest({
+        manifest: item.video_dash_manifest,
+        thumbnailUrl: bestImageUrl || "",
+      });
+      resources.push(...dashResources);
+    }
+
+    contentInfo.stories.push({
+      id: String(item.id || item.pk),
+      type: isVideo ? "video" : "image",
+      resources,
+      thumbnail: bestImageUrl || "",
+    });
+  }
+
+  return contentInfo;
+}
+
+/**
+ * @private
+ */
+const highlightFormatter = (json: any) => {
+  const data =
+    json?.data?.xdt_api__v1__feed__reels_media__connection?.edges?.[0]?.node
+
+    if (!data) {
     return null;
   }
   const owner = data?.user;

@@ -22,5 +22,5 @@ export const frontmatter = {
     ko: "TikTok 영상, 슬라이드쇼, 음악을 다운로드하세요.",
   },
   isNew: true,
-  updatedAt: "2026-07-05T20:44:45.408Z",
+  updatedAt: "2026-10-21T18:33:05.217Z",
 };

@@ -1,7 +1,6 @@
 import querystring from "querystring";
 
 import { HttpRequest } from "@/utils";
-import { handleScraperError } from "./helpers";
 import { formatGraphqlJson, formatWebInfoMedia } from "./formatters";
 import { IG_SEMI_PRIVATE_REEL_FETCH_API } from "@/constants";
 import {
@@ -9,22 +8,24 @@ import {
   InstagramContentType,
 } from "@/types/api/downloader";
 import axios from "axios";
-import { BadRequest } from "@/lib/exceptions";
 import { redenv } from "@/lib/redenv";
 
 const encodePostRequestData = (postId: string, type: InstagramContentType) => {
   const isPostOrReel = ["post", "reel"].includes(type);
-  const docId = isPostOrReel ? "27128499623469141" : "31842794902034649";
+  const docId = isPostOrReel
+    ? "27128499623469141"
+    : type === "story"
+      ? "28449850404637481"
+      : "31842794902034649";
   const variables = isPostOrReel
     ? {
         shortcode: postId,
-        "__relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider": false,
+        __relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider: false,
       }
     : type === "story"
       ? {
-          initial_reel_id: postId,
-          reel_ids: [postId],
-          first: 1,
+          reel_ids_arr: [postId],
+          __relay_internal__pv__PolarisCommunityNoteStoriesLabelEnabledrelayprovider: true,
         }
       : {
           initial_reel_id: `highlight:${postId}`,
@@ -50,8 +51,6 @@ const encodePostRequestData = (postId: string, type: InstagramContentType) => {
         __s: "gx238d:cul40h:zbuf8d",
         __hsi: "7658983823372492036",
         __comet_req: 7,
-        fb_dtsg:
-          "NAfw4GdtVXaJHlGgOGWtV9hdVXsdlqvY6nX_qD8qruYlTeoC48_Andw:17854477105113577:1792596994",
         jazoest: 26332,
         lsd: "Hi-Ku9fJhgO0Onw-dvdGaM",
         __spin_r: 1051144468,
@@ -133,7 +132,10 @@ export const fetchFromGraphQL = async (
     try {
       json = await fetchFromWebInfoHtml(postId, type, timeout || 8000);
     } catch (e) {
-      console.error("fetchFromWebInfoHtml fallback error:", (e as Error).message);
+      console.error(
+        "fetchFromWebInfoHtml fallback error:",
+        (e as Error).message,
+      );
     }
   }
 
@@ -146,7 +148,10 @@ export const fetchFromGraphQL = async (
         json.type = type;
       }
     } catch (e) {
-      console.error("IG semi-private reel fallback error:", (e as Error).message);
+      console.error(
+        "IG semi-private reel fallback error:",
+        (e as Error).message,
+      );
     }
   }
 

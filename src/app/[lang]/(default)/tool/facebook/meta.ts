@@ -23,5 +23,5 @@ export const frontmatter = {
     ko: "Facebook 동영상, 릴스 및 스토리를 다운로드하세요.",
   },
   isNew: false,
-  updatedAt: "2026-07-05T22:27:19.079Z",
+  updatedAt: "2026-10-21T18:35:43.813Z",
 };

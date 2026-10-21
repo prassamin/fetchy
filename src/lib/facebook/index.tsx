@@ -69,7 +69,10 @@ export const getContentFbId = async ({
   const storyCheck = url.match(storyRegex);
   if (storyCheck) {
     contentId = storyCheck.at(-1);
-    if (html && html.includes("StoryHighlightContainer")) {
+    if (
+      url.includes("source=profile_highlight") ||
+      (html && html.includes("StoryHighlightContainer"))
+    ) {
       return {
         type: "highlight",
         contentId,

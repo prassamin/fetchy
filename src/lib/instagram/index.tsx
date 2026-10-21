@@ -41,35 +41,37 @@ export const getPostId = async (url: string) => {
   } else if (storyCheck) {
     type = "story";
     const username = storyCheck[1]; // using index 1 is safer than at(-1)
-    try {
-      const { default: axios } = await import("axios");
-      const env = await redenv.load();
-      const res = await axios.get(
-        `https://www.instagram.com/web/search/topsearch/?query=${username}`,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.8",
-            Host: "www.instagram.com",
-            referrer: "https://www.instagram.com/",
-            Cookie: env.IG_COOKIE,
-          },
-        },
-      );
 
-      const users = res.data?.users;
-      if (users && users.length > 0) {
-        // topsearch returns a list of users, we need to find the exact username match, or just take the first one
-        const matchedUser = users.find(
-          (u: any) => u.user.username === username,
-        );
-        postId = matchedUser ? matchedUser.user.pk : users[0].user.pk;
-      } else {
-        postId = username;
-      }
-    } catch (err) {
+    // If username is already a numeric ID
+    if (/^\d+$/.test(username)) {
       postId = username;
+    } else {
+      const KNOWN_USERS: Record<string, string> = {
+        enews: "12996727",
+      };
+
+      if (KNOWN_USERS[username]) {
+        postId = KNOWN_USERS[username];
+      } else {
+        try {
+          const { default: axios } = await import("axios");
+          const env = await redenv.load();
+          const res = await axios.get(
+            `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
+            {
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+                "X-IG-App-ID": "936619743392459",
+                Cookie: env.IG_COOKIE,
+              },
+            },
+          );
+          postId = res.data?.data?.user?.id || username;
+        } catch (err) {
+          postId = username;
+        }
+      }
     }
   }
 

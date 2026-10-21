@@ -93,7 +93,9 @@ export const fetchFromFbGraphQL = async (
     "user-agent":
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "x-asbd-id": "359341",
-    "x-fb-friendly-name": "StoriesViewerBucketPrefetcherMultiBucketsQuery",
+    "x-fb-friendly-name": isVideo
+      ? "CometTahoeSidePaneQuery"
+      : "StoriesViewerBucketPrefetcherMultiBucketsQuery",
     origin: "https://www.facebook.com",
     cookie: !isVideo ? env.FB_COOKIE : null,
   };
@@ -103,28 +105,24 @@ export const fetchFromFbGraphQL = async (
       ? encodeVideoRequestData(contentId)
       : encodeStoryHighlightRequestData(contentId, type, env.FB_DTSG_TOKEN);
 
-  let response;
+  let responseJson: any = null;
   try {
-    response = await HttpRequest({
+    const response = await HttpRequest({
       url: API_URL,
       method: "POST",
       headers,
       data: encodedData,
       timeout,
     });
-    if (response.statusText === "error") {
-      return null;
+    if (response && response.statusText !== "error") {
+      responseJson = response.data;
     }
   } catch (e: any) {
     handleScraperError(e);
-    return null;
   }
-  if (response.statusText === "error") return null;
-
-  const responseJson = response.data;
 
   if (type === "video") {
-    let json = formatGraphqlVideoJson(responseJson);
+    let json = responseJson ? formatGraphqlVideoJson(responseJson) : null;
     // if formatedJson is null, thats mean it might be a private or semi-private video. so fetch it from the cdn
     if (json === null) {
       json = await fetchSemiPrivateVideo(requestedUrl);
@@ -138,6 +136,7 @@ export const fetchFromFbGraphQL = async (
 
     return json;
   } else if (type === "story" || type === "highlight") {
+    if (!responseJson) return null;
     const formatedJson = formatGraphqlStoryJson(responseJson, contentId, type);
 
     if (!formatedJson?.owner || formatedJson?.stories?.length === 0)

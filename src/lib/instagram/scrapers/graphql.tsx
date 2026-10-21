@@ -111,9 +111,10 @@ export const fetchFromGraphQL = async (
 
   const encodedData = encodePostRequestData(postId, type);
 
-  let response: any;
+  let json: any = null;
+
   try {
-    response = await HttpRequest({
+    const response = await HttpRequest({
       url: API_URL,
       method: "POST",
       headers,
@@ -121,28 +122,20 @@ export const fetchFromGraphQL = async (
       timeout,
     });
 
-    if (response.statusText === "error") {
-      return null;
+    if (response && response.statusText !== "error" && response.data?.data) {
+      json = formatGraphqlJson(response.data, type);
     }
   } catch (e) {
     handleScraperError(e as Error);
-    return null;
   }
 
-  if (response.statusText === "error") return null;
-
-  const responseJson = response.data;
-  if (!responseJson.data) return null;
-
-  let json = formatGraphqlJson(responseJson, type);
-
-  // if formatedJson is null, thats mean it might be a private or semi-private video. so fetch it from the cdn
-  if (json === null) {
+  // If GraphQL failed or returned null (rate-limited, blocked, or private/semi-private), fallback to CDN parser
+  if (!json && (type === "reel" || type === "post")) {
     json = await fetchIGSemiPrivateReel(requestedUrl, timeout);
+    if (json) {
+      json.type = type;
+    }
   }
-
-  // if it is still null, then throw error
-  if (json === null) throw new BadRequest("This post does not exist");
 
   return json;
 };

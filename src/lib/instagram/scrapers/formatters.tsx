@@ -12,16 +12,200 @@ import {
   InstagramResource,
   InstagramResponse,
   InstagramStoryResponse,
+  Owner,
 } from "@/types/api/downloader";
 
 export const formatGraphqlJson = (json: any, type: InstagramContentType) => {
   if (type === "post" || type === "reel") {
+    if (json?.data?.xdt_api__v1__media__shortcode__web_info?.items?.[0]) {
+      return formatWebInfoMedia(
+        json.data.xdt_api__v1__media__shortcode__web_info.items[0]
+      );
+    }
     return postAndReelFormatter(json);
   }
 
   if (type === "highlight" || type === "story") return highlightFormatter(json);
 
+  if (json?.data?.xdt_api__v1__media__shortcode__web_info?.items?.[0]) {
+    return formatWebInfoMedia(
+      json.data.xdt_api__v1__media__shortcode__web_info.items[0]
+    );
+  }
+
   return postAndReelFormatter(json);
+};
+
+export const formatWebInfoMedia = (data: any): InstagramResponse | null => {
+  if (!data) return null;
+
+  const thumbnail =
+    data.image_versions2?.candidates?.[0]?.url ||
+    data.carousel_media?.[0]?.image_versions2?.candidates?.[0]?.url;
+
+  const owner: Owner = {
+    id: String(data.user?.id || data.user?.pk || ""),
+    name: data.user?.full_name || data.user?.username || "",
+    username: data.user?.username || "",
+    profile_pic: data.user?.profile_pic_url || "",
+    profile_url: `https://www.instagram.com/${data.user?.username}/`,
+  };
+
+  const isCarousel = !!(data.carousel_media && data.carousel_media.length > 0);
+  const isVideo = !!(data.video_versions && data.video_versions.length > 0);
+
+  if (isCarousel) {
+    const resources: InstagramResource[] = data.carousel_media.map(
+      (child: any, idx: number) => {
+        const childIsVideo = !!(
+          child.video_versions && child.video_versions.length > 0
+        );
+        const childThumb =
+          child.image_versions2?.candidates?.[0]?.url || thumbnail;
+        const id = String(child.id || child.pk || `${data.id}_${idx}`);
+
+        const resource: InstagramResource = {
+          id,
+          filename: childIsVideo
+            ? getIGVideoFileName(id)
+            : getIGImageFileName(id),
+          type: childIsVideo ? "video" : "image",
+          mime_type: childIsVideo ? "video/mp4" : "image/jpeg",
+          has_audio: childIsVideo,
+          width: childIsVideo
+            ? child.video_versions?.[0]?.width
+            : child.image_versions2?.candidates?.[0]?.width,
+          height: childIsVideo
+            ? child.video_versions?.[0]?.height
+            : child.image_versions2?.candidates?.[0]?.height,
+          baseURL: childIsVideo ? child.video_versions?.[0]?.url : childThumb,
+          thumbnail: childThumb,
+        };
+
+        if (childIsVideo) {
+          resource.quality = "720p";
+        }
+
+        return resource;
+      }
+    );
+
+    return {
+      id: String(data.id || data.pk),
+      owner,
+      type: "post",
+      thumbnail,
+      resources,
+    };
+  }
+
+  if (isVideo) {
+    const id = String(data.id || data.pk);
+    const videoUrl = data.video_versions?.[0]?.url;
+    const width = data.video_versions?.[0]?.width;
+    const height = data.video_versions?.[0]?.height;
+
+    const videoJson: InstagramResponse = {
+      id,
+      owner,
+      thumbnail,
+      type: "reel",
+      resources: [
+        {
+          id,
+          filename: getIGVideoFileName(id),
+          type: "video",
+          mime_type: "video/mp4",
+          quality: "720p",
+          has_audio: true,
+          width,
+          height,
+          baseURL: videoUrl,
+          thumbnail,
+        },
+      ],
+    };
+
+    if (data.video_dash_manifest) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(
+        data.video_dash_manifest,
+        "application/xml"
+      );
+      const AdaptationSet = doc.getElementsByTagName("AdaptationSet");
+
+      for (let i = 0; i < AdaptationSet.length; i++) {
+        const adp = AdaptationSet[i];
+        const rep = adp.getElementsByTagName("Representation");
+
+        for (let j = 0; j < rep.length; j++) {
+          const baseURL =
+            rep[j].getElementsByTagName("BaseURL")[0]?.textContent;
+          if (!baseURL) continue;
+
+          const repWidth = rep[j].getAttribute("width");
+          const repHeight = rep[j].getAttribute("height");
+          const mimeType = rep[j].getAttribute("mimeType");
+          const quality =
+            rep[j].getAttribute("FBQualityLabel") ||
+            rep[j].getAttribute("FBQualityClass") ||
+            `${repWidth}p`;
+          const repType = adp.getAttribute("contentType");
+
+          if (repType === "video") {
+            videoJson.resources.push({
+              id: `${rep[j].getAttribute("id")}`,
+              mime_type: mimeType || "video/mp4",
+              filename: getIGVideoFileName(rep[j].getAttribute("id") || ""),
+              type: "video",
+              quality,
+              has_audio: false,
+              width: Number(repWidth),
+              height: Number(repHeight),
+              baseURL,
+              thumbnail,
+            });
+          } else if (repType === "audio") {
+            videoJson.resources.push({
+              id: `${rep[j].getAttribute("id")}`,
+              mime_type: "audio/mp3",
+              filename: getIGAudioFileName(rep[j].getAttribute("id") || ""),
+              has_audio: true,
+              type: "audio",
+              bitrate: "128kbps",
+              baseURL,
+            });
+          }
+        }
+      }
+    }
+
+    return videoJson;
+  }
+
+  // Single Image Post
+  const id = String(data.id || data.pk);
+  const imgUrl = data.image_versions2?.candidates?.[0]?.url;
+
+  return {
+    id,
+    owner,
+    thumbnail: imgUrl,
+    type: "post",
+    resources: [
+      {
+        id,
+        filename: getIGImageFileName(id),
+        type: "image",
+        mime_type: "image/jpeg",
+        has_audio: false,
+        width: data.image_versions2?.candidates?.[0]?.width,
+        height: data.image_versions2?.candidates?.[0]?.height,
+        baseURL: imgUrl,
+        thumbnail: imgUrl,
+      },
+    ],
+  };
 };
 
 /**

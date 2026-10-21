@@ -100,10 +100,8 @@ export const resolveInstaRedirectUrl = async (url: string) => {
     );
     finalUrl = res.data.url || url;
   } catch (err) {
-    throw new BadRequest(
-      ((err as AxiosError)?.response?.data as any)?.error || "Internal Error",
-      400,
-    );
+    console.warn("Failed to unshorten IG URL, falling back to original:", err);
+    finalUrl = url;
   }
 
   return finalUrl;
@@ -117,11 +115,12 @@ export const fetchInstaContentJson = async (
 
   let finalUrl = url;
 
-  const isStory = url.match(
-    /^https:\/\/(?:www\.)?instagram\.com\/stories\/([a-zA-Z0-9._-]+)\/?/,
-  );
+  const isDirectUrl =
+    /^https:\/\/(?:www\.)?instagram\.com\/(?:[a-zA-Z0-9._-]+\/)?(?:p|reel|reels)\/([a-zA-Z0-9_-]+)/.test(
+      url,
+    ) || /^https:\/\/(?:www\.)?instagram\.com\/stories\//.test(url);
 
-  if (!isStory) {
+  if (!isDirectUrl) {
     finalUrl = await resolveInstaRedirectUrl(url);
   }
 

@@ -18,7 +18,7 @@ export const instagramShortcodeToId = (shortcode: string): string => {
   return id.toString();
 };
 
-export const getPostId = async (url: string) => {
+export const getPostId = async (url: string, cookie?: string) => {
   const t = await getTranslations("errors");
 
   const postRegex =
@@ -51,6 +51,7 @@ export const getPostId = async (url: string) => {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+          cookie,
         },
       });
       id = res.data?.match(idRegex)?.[1];
@@ -64,16 +65,12 @@ export const getPostId = async (url: string) => {
   if (postCheck) {
     const rawCode = postCheck.at(-1) || "";
     postId =
-      (await getPostOrReelId()) ||
-      instagramShortcodeToId(rawCode) ||
-      rawCode;
+      (await getPostOrReelId()) || instagramShortcodeToId(rawCode) || rawCode;
     type = "post";
   } else if (reelCheck) {
     const rawCode = reelCheck.at(-1) || "";
     postId =
-      (await getPostOrReelId()) ||
-      instagramShortcodeToId(rawCode) ||
-      rawCode;
+      (await getPostOrReelId()) || instagramShortcodeToId(rawCode) || rawCode;
     type = "reel";
   } else if (highlightCheck) {
     postId = highlightCheck.at(-1);
@@ -93,6 +90,7 @@ export const getPostId = async (url: string) => {
           headers: {
             "User-Agent":
               "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+            cookie,
           },
         });
         postId = res.data?.match(userIdRegex)?.[1] || username;
@@ -139,6 +137,7 @@ export const fetchInstaContentJson = async (
   url: string,
   timeout: number = 0,
 ) => {
+  const env = await redenv.load();
   const t = await getTranslations("errors");
 
   let finalUrl = url;
@@ -152,7 +151,7 @@ export const fetchInstaContentJson = async (
     finalUrl = await resolveInstaRedirectUrl(url);
   }
 
-  const { id: postId, type } = await getPostId(finalUrl);
+  const { id: postId, type } = await getPostId(finalUrl, env.IG_COOKIE);
 
   const apiJson = await fetchFromGraphQL(postId, finalUrl, timeout, type);
   if (apiJson) return apiJson;

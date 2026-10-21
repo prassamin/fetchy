@@ -2,8 +2,21 @@ import { BadRequest } from "@/lib/exceptions";
 import { fetchFromGraphQL } from "./scrapers/graphql";
 import { getTranslations } from "next-intl/server";
 import { redenv } from "@/lib/redenv";
-import { AxiosError } from "axios";
 import { IG_URL_RESOLVE_API } from "@/constants";
+
+export const instagramShortcodeToId = (shortcode: string): string => {
+  if (!shortcode || /^\d+$/.test(shortcode)) return shortcode;
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let id = BigInt(0);
+  for (let i = 0; i < shortcode.length; i++) {
+    const char = shortcode[i];
+    const val = BigInt(alphabet.indexOf(char));
+    if (val === BigInt(-1)) return shortcode;
+    id = id * BigInt(64) + val;
+  }
+  return id.toString();
+};
 
 export const getPostId = async (url: string) => {
   const t = await getTranslations("errors");
@@ -29,11 +42,38 @@ export const getPostId = async (url: string) => {
   const highlightCheck = url.match(highlightRegex);
   const storyCheck = url.match(storyRegex);
 
+  const getPostOrReelId = async () => {
+    const idRegex = /"media_id":"(\d+)"/;
+    let id;
+    try {
+      const { default: axios } = await import("axios");
+      const res = await axios.get(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+        },
+      });
+      id = res.data?.match(idRegex)?.[1];
+    } catch (err) {
+      console.log(err);
+      id = null;
+    }
+    return id;
+  };
+
   if (postCheck) {
-    postId = postCheck.at(-1);
+    const rawCode = postCheck.at(-1) || "";
+    postId =
+      (await getPostOrReelId()) ||
+      instagramShortcodeToId(rawCode) ||
+      rawCode;
     type = "post";
   } else if (reelCheck) {
-    postId = reelCheck.at(-1);
+    const rawCode = reelCheck.at(-1) || "";
+    postId =
+      (await getPostOrReelId()) ||
+      instagramShortcodeToId(rawCode) ||
+      rawCode;
     type = "reel";
   } else if (highlightCheck) {
     postId = highlightCheck.at(-1);
@@ -46,31 +86,19 @@ export const getPostId = async (url: string) => {
     if (/^\d+$/.test(username)) {
       postId = username;
     } else {
-      const KNOWN_USERS: Record<string, string> = {
-        enews: "12996727",
-      };
-
-      if (KNOWN_USERS[username]) {
-        postId = KNOWN_USERS[username];
-      } else {
-        try {
-          const { default: axios } = await import("axios");
-          const env = await redenv.load();
-          const res = await axios.get(
-            `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
-            {
-              headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
-                "X-IG-App-ID": "936619743392459",
-                Cookie: env.IG_COOKIE,
-              },
-            },
-          );
-          postId = res.data?.data?.user?.id || username;
-        } catch (err) {
-          postId = username;
-        }
+      const userIdRegex = /"profile_id":"(\d+)"/;
+      try {
+        const { default: axios } = await import("axios");
+        const res = await axios.get(`https://www.instagram.com/${username}`, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+          },
+        });
+        postId = res.data?.match(userIdRegex)?.[1] || username;
+      } catch (err) {
+        console.log(err);
+        postId = username;
       }
     }
   }
@@ -125,6 +153,7 @@ export const fetchInstaContentJson = async (
   }
 
   const { id: postId, type } = await getPostId(finalUrl);
+
   const apiJson = await fetchFromGraphQL(postId, finalUrl, timeout, type);
   if (apiJson) return apiJson;
 

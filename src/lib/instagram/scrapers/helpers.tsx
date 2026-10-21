@@ -39,7 +39,7 @@ export const parseDashManifest = ({
 
   for (let i = 0; i < AdaptationSets.length; i++) {
     const adp = AdaptationSets[i];
-    const type = adp.getAttribute("contentType");
+    const rawType = adp.getAttribute("contentType");
 
     const reps = adp.getElementsByTagName("Representation");
     for (let j = 0; j < reps.length; j++) {
@@ -54,9 +54,21 @@ export const parseDashManifest = ({
       const quality =
         rep.getAttribute("FBQualityLabel") ||
         rep.getAttribute("FBQualityClass") ||
-        (width ? `${width}p` : "unknown");
+        (width && height
+          ? `${Math.min(width, height)}p`
+          : width
+            ? `${width}p`
+            : "unknown");
 
-      if (type === "video") {
+      const isVideo =
+        rawType === "video" ||
+        mimeType.startsWith("video") ||
+        !!(width || height);
+      const isAudio =
+        rawType === "audio" ||
+        mimeType.startsWith("audio");
+
+      if (isVideo) {
         list.push({
           id,
           type: "video",
@@ -69,7 +81,7 @@ export const parseDashManifest = ({
           baseURL,
           thumbnail: thumbnailUrl,
         });
-      } else if (type === "audio") {
+      } else if (isAudio) {
         list.push({
           id,
           type: "audio",

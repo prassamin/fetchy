@@ -14,84 +14,113 @@ import {
   InstagramStoryResponse,
   Owner,
 } from "@/types/api/downloader";
+import fs from "fs";
 
 export const formatGraphqlJson = (json: any, type: InstagramContentType) => {
   if (type === "post" || type === "reel") {
-    if (json?.data?.xdt_api__v1__media__shortcode__web_info?.items?.[0]) {
-      return formatWebInfoMedia(
-        json.data.xdt_api__v1__media__shortcode__web_info.items[0]
-      );
-    }
-    return postAndReelFormatter(json);
+    return formatMediaInfoPostAndReel(json, type);
   }
 
-  if (type === "highlight" || type === "story") return highlightFormatter(json);
+  if (type === "highlight") return highlightFormatter(json);
 
-  if (json?.data?.xdt_api__v1__media__shortcode__web_info?.items?.[0]) {
-    return formatWebInfoMedia(
-      json.data.xdt_api__v1__media__shortcode__web_info.items[0]
-    );
-  }
+  if (type === "story") return storyFormatter(json);
 
-  return postAndReelFormatter(json);
+  return formatMediaInfoPostAndReel(json, type);
 };
 
-export const formatWebInfoMedia = (data: any): InstagramResponse | null => {
-  if (!data) return null;
+export const formatMediaInfoPostAndReel = (
+  json: any,
+  targetType?: InstagramContentType
+): InstagramResponse | null => {
+  if (!json) return null;
 
-  const thumbnail =
-    data.image_versions2?.candidates?.[0]?.url ||
-    data.carousel_media?.[0]?.image_versions2?.candidates?.[0]?.url;
+  const item =
+    json?.items?.[0] ||
+    json?.data?.items?.[0] ||
+    json?.data?.xdt_api__v1__media__shortcode__web_info?.items?.[0] ||
+    (json?.pk || json?.id || json?.user ? json : null);
 
+  if (!item) return null;
+
+  const user = item.user || item.owner || {};
   const owner: Owner = {
-    id: String(data.user?.id || data.user?.pk || ""),
-    name: data.user?.full_name || data.user?.username || "",
-    username: data.user?.username || "",
-    profile_pic: data.user?.profile_pic_url || "",
-    profile_url: `https://www.instagram.com/${data.user?.username}/`,
+    id: String(user.id || user.pk || ""),
+    name: user.full_name || user.username || "",
+    username: user.username || "",
+    profile_pic: user.profile_pic_url || user.profile_pic || "",
+    profile_url: user.username
+      ? `https://www.instagram.com/${user.username}/`
+      : "",
   };
 
-  const isCarousel = !!(data.carousel_media && data.carousel_media.length > 0);
-  const isVideo = !!(data.video_versions && data.video_versions.length > 0);
+  const id = String(item.pk || item.id || "");
+  const thumbnail =
+    item.image_versions2?.candidates?.[0]?.url ||
+    item.carousel_media?.[0]?.image_versions2?.candidates?.[0]?.url ||
+    "";
+
+  const isCarousel =
+    Array.isArray(item.carousel_media) && item.carousel_media.length > 0;
+  const isVideo =
+    !isCarousel &&
+    (item.media_type === 2 ||
+      !!(item.video_versions && item.video_versions.length > 0) ||
+      !!item.video_dash_manifest);
 
   if (isCarousel) {
-    const resources: InstagramResource[] = data.carousel_media.map(
+    const resources: InstagramResource[] = item.carousel_media.map(
       (child: any, idx: number) => {
-        const childIsVideo = !!(
-          child.video_versions && child.video_versions.length > 0
-        );
+        const childIsVideo =
+          child.media_type === 2 ||
+          !!(child.video_versions && child.video_versions.length > 0);
+        const childId = String(child.pk || child.id || `${id}_${idx}`);
         const childThumb =
           child.image_versions2?.candidates?.[0]?.url || thumbnail;
-        const id = String(child.id || child.pk || `${data.id}_${idx}`);
-
-        const resource: InstagramResource = {
-          id,
-          filename: childIsVideo
-            ? getIGVideoFileName(id)
-            : getIGImageFileName(id),
-          type: childIsVideo ? "video" : "image",
-          mime_type: childIsVideo ? "video/mp4" : "image/jpeg",
-          has_audio: childIsVideo,
-          width: childIsVideo
-            ? child.video_versions?.[0]?.width
-            : child.image_versions2?.candidates?.[0]?.width,
-          height: childIsVideo
-            ? child.video_versions?.[0]?.height
-            : child.image_versions2?.candidates?.[0]?.height,
-          baseURL: childIsVideo ? child.video_versions?.[0]?.url : childThumb,
-          thumbnail: childThumb,
-        };
 
         if (childIsVideo) {
-          resource.quality = "720p";
-        }
+          const videoUrl = child.video_versions?.[0]?.url;
+          const width =
+            child.video_versions?.[0]?.width || child.original_width;
+          const height =
+            child.video_versions?.[0]?.height || child.original_height;
+          const minDim =
+            width && height ? Math.min(width, height) : undefined;
+          const quality = minDim ? `${minDim}p` : "720p";
 
-        return resource;
+          const resource: InstagramResource = {
+            id: childId,
+            filename: getIGVideoFileName(childId),
+            type: "video",
+            mime_type: "video/mp4",
+            quality,
+            has_audio: child.has_audio !== false,
+            width,
+            height,
+            baseURL: videoUrl,
+            thumbnail: childThumb,
+          };
+          return resource;
+        } else {
+          const imgCandidate = child.image_versions2?.candidates?.[0];
+          const imgUrl = imgCandidate?.url || childThumb;
+          const resource: InstagramResource = {
+            id: childId,
+            filename: getIGImageFileName(childId),
+            type: "image",
+            mime_type: "image/jpeg",
+            has_audio: false,
+            width: imgCandidate?.width || child.original_width,
+            height: imgCandidate?.height || child.original_height,
+            baseURL: imgUrl,
+            thumbnail: imgUrl,
+          };
+          return resource;
+        }
       }
     );
 
     return {
-      id: String(data.id || data.pk),
+      id,
       owner,
       type: "post",
       thumbnail,
@@ -100,92 +129,76 @@ export const formatWebInfoMedia = (data: any): InstagramResponse | null => {
   }
 
   if (isVideo) {
-    const id = String(data.id || data.pk);
-    const videoUrl = data.video_versions?.[0]?.url;
-    const width = data.video_versions?.[0]?.width;
-    const height = data.video_versions?.[0]?.height;
+    const primaryVideo = item.video_versions?.[0];
+    const videoUrl = primaryVideo?.url;
+    const width = primaryVideo?.width || item.original_width;
+    const height = primaryVideo?.height || item.original_height;
+    const minDim = width && height ? Math.min(width, height) : undefined;
+    const quality = minDim ? `${minDim}p` : (height ? `${height}p` : "720p");
 
-    const videoJson: InstagramResponse = {
+    const resources: InstagramResource[] = [];
+
+    if (videoUrl) {
+      resources.push({
+        id,
+        filename: getIGVideoFileName(id),
+        type: "video",
+        mime_type: "video/mp4",
+        quality,
+        has_audio: item.has_audio !== false,
+        width,
+        height,
+        baseURL: videoUrl,
+        thumbnail,
+      });
+    }
+
+    if (item.video_dash_manifest) {
+      const dashResources = parseDashManifest({
+        manifest: item.video_dash_manifest,
+        thumbnailUrl: thumbnail,
+      });
+      resources.push(...dashResources);
+    }
+
+    const directAudioUrl =
+      item.clips_metadata?.original_sound_info?.progressive_download_url ||
+      item.clips_metadata?.music_info?.music_asset_info?.progressive_download_url;
+
+    if (directAudioUrl && !resources.some((r) => r.baseURL === directAudioUrl)) {
+      const audioAssetId = String(
+        item.clips_metadata?.original_sound_info?.audio_asset_id ||
+          item.clips_metadata?.music_info?.music_asset_info?.audio_asset_id ||
+          `${id}_audio`
+      );
+      resources.push({
+        id: audioAssetId,
+        filename: getIGAudioFileName(audioAssetId),
+        type: "audio",
+        mime_type: "audio/mp3",
+        has_audio: true,
+        bitrate: "128kbps",
+        baseURL: directAudioUrl,
+      });
+    }
+
+    const responseType: "reel" | "post" =
+      item.product_type === "clips" || targetType === "reel"
+        ? "reel"
+        : "post";
+
+    return {
       id,
       owner,
       thumbnail,
-      type: "reel",
-      resources: [
-        {
-          id,
-          filename: getIGVideoFileName(id),
-          type: "video",
-          mime_type: "video/mp4",
-          quality: "720p",
-          has_audio: true,
-          width,
-          height,
-          baseURL: videoUrl,
-          thumbnail,
-        },
-      ],
+      type: responseType,
+      resources,
     };
-
-    if (data.video_dash_manifest) {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(
-        data.video_dash_manifest,
-        "application/xml"
-      );
-      const AdaptationSet = doc.getElementsByTagName("AdaptationSet");
-
-      for (let i = 0; i < AdaptationSet.length; i++) {
-        const adp = AdaptationSet[i];
-        const rep = adp.getElementsByTagName("Representation");
-
-        for (let j = 0; j < rep.length; j++) {
-          const baseURL =
-            rep[j].getElementsByTagName("BaseURL")[0]?.textContent;
-          if (!baseURL) continue;
-
-          const repWidth = rep[j].getAttribute("width");
-          const repHeight = rep[j].getAttribute("height");
-          const mimeType = rep[j].getAttribute("mimeType");
-          const quality =
-            rep[j].getAttribute("FBQualityLabel") ||
-            rep[j].getAttribute("FBQualityClass") ||
-            `${repWidth}p`;
-          const repType = adp.getAttribute("contentType");
-
-          if (repType === "video") {
-            videoJson.resources.push({
-              id: `${rep[j].getAttribute("id")}`,
-              mime_type: mimeType || "video/mp4",
-              filename: getIGVideoFileName(rep[j].getAttribute("id") || ""),
-              type: "video",
-              quality,
-              has_audio: false,
-              width: Number(repWidth),
-              height: Number(repHeight),
-              baseURL,
-              thumbnail,
-            });
-          } else if (repType === "audio") {
-            videoJson.resources.push({
-              id: `${rep[j].getAttribute("id")}`,
-              mime_type: "audio/mp3",
-              filename: getIGAudioFileName(rep[j].getAttribute("id") || ""),
-              has_audio: true,
-              type: "audio",
-              bitrate: "128kbps",
-              baseURL,
-            });
-          }
-        }
-      }
-    }
-
-    return videoJson;
   }
 
   // Single Image Post
-  const id = String(data.id || data.pk);
-  const imgUrl = data.image_versions2?.candidates?.[0]?.url;
+  const imgCandidate = item.image_versions2?.candidates?.[0];
+  const imgUrl = imgCandidate?.url || thumbnail;
 
   return {
     id,
@@ -199,13 +212,17 @@ export const formatWebInfoMedia = (data: any): InstagramResponse | null => {
         type: "image",
         mime_type: "image/jpeg",
         has_audio: false,
-        width: data.image_versions2?.candidates?.[0]?.width,
-        height: data.image_versions2?.candidates?.[0]?.height,
+        width: imgCandidate?.width || item.original_width,
+        height: imgCandidate?.height || item.original_height,
         baseURL: imgUrl,
         thumbnail: imgUrl,
       },
     ],
   };
+};
+
+export const formatWebInfoMedia = (data: any): InstagramResponse | null => {
+  return formatMediaInfoPostAndReel(data);
 };
 
 /**
@@ -379,11 +396,131 @@ const postAndReelFormatter = (json: any) => {
 /**
  * @private
  */
-const highlightFormatter = (json: any) => {
+const storyFormatter = (json: any): InstagramStoryResponse | null => {
+  if (!json?.data) return null;
+
+  // Support both reels_media array structure and legacy connection edges
   const data =
-    json?.data?.xdt_api__v1__feed__reels_media__connection?.edges?.[0]?.node;
+    json?.data?.xdt_api__v1__feed__reels_media?.reels_media?.[0] ||
+    json?.data?.xdt_api__v1__feed__reels_media__connection?.edges?.[0]?.node ||
+    json?.data?.xdt_api__v1__feed__reels_media?.edges?.[0]?.node;
 
   if (!data) {
+    return null;
+  }
+
+  const user = data.user || {};
+  const owner: Owner = {
+    id: String(user.id || user.pk || data.id || ""),
+    name: user.full_name || user.username || "",
+    username: user.username || "",
+    profile_pic: user.profile_pic_url || user.profile_pic || "",
+    profile_url: user.username
+      ? `https://www.instagram.com/${user.username}/`
+      : "",
+  };
+
+  const firstCandidate =
+    data.items?.[0]?.image_versions2?.candidates?.[0]?.url || null;
+
+  const contentInfo: InstagramStoryResponse = {
+    id: String(data.id || owner.id),
+    owner,
+    type: "story",
+    thumbnail: firstCandidate,
+    stories: [],
+  };
+
+  const items = Array.isArray(data.items) ? data.items : [];
+
+  for (const item of items) {
+    const imageVersions = item?.image_versions2?.candidates;
+
+    // Pick best image candidate by largest resolution area (width * height)
+    const bestImageCandidate =
+      Array.isArray(imageVersions) && imageVersions.length > 0
+        ? imageVersions.reduce((best: any, cand: any) => {
+            const bestArea = (best?.width ?? 0) * (best?.height ?? 0);
+            const candArea = (cand?.width ?? 0) * (cand?.height ?? 0);
+            return candArea > bestArea ? cand : best;
+          }, imageVersions[0])
+        : null;
+
+    const bestImageUrl: string | null = bestImageCandidate?.url ?? null;
+    const isVideo =
+      item?.media_type === 2 ||
+      !!(item?.video_versions && item.video_versions.length > 0) ||
+      !!item?.video_dash_manifest;
+
+    const resources: InstagramResource[] = [];
+
+    // Image Resource (High quality poster / still photo)
+    if (bestImageUrl) {
+      resources.push({
+        id: _generateRandomId(),
+        filename: getIGImageFileName(
+          `${item?.id || item?.pk}_${bestImageCandidate?.width}x${bestImageCandidate?.height}`
+        ),
+        type: "image",
+        mime_type: "image/jpg",
+        has_audio: false,
+        width: bestImageCandidate?.width,
+        height: bestImageCandidate?.height,
+        baseURL: bestImageUrl,
+        thumbnail: bestImageUrl,
+      });
+    }
+
+    // Standard Progressive MP4 Video (if video)
+    const standardVideo = item?.video_versions?.[0]?.url;
+    if (standardVideo) {
+      const vidWidth = item?.original_width || item?.video_versions?.[0]?.width;
+      const vidHeight =
+        item?.original_height || item?.video_versions?.[0]?.height;
+      resources.push({
+        id: _generateRandomId(),
+        filename: getIGVideoFileName(
+          `${item?.id || item?.pk}_${vidWidth}x${vidHeight}`
+        ),
+        type: "video",
+        mime_type: "video/mp4",
+        quality: vidWidth ? `${vidWidth}p` : "720p",
+        has_audio: item?.has_audio !== false,
+        width: vidWidth,
+        height: vidHeight,
+        baseURL: standardVideo,
+        thumbnail: bestImageUrl || "",
+      });
+    }
+
+    // DASH Manifest Representations (1080p, 720p, 540p, 360p, and Audio)
+    if (item?.video_dash_manifest) {
+      const dashResources = parseDashManifest({
+        manifest: item.video_dash_manifest,
+        thumbnailUrl: bestImageUrl || "",
+      });
+      resources.push(...dashResources);
+    }
+
+    contentInfo.stories.push({
+      id: String(item.id || item.pk),
+      type: isVideo ? "video" : "image",
+      resources,
+      thumbnail: bestImageUrl || "",
+    });
+  }
+
+  return contentInfo;
+}
+
+/**
+ * @private
+ */
+const highlightFormatter = (json: any) => {
+  const data =
+    json?.data?.xdt_api__v1__feed__reels_media__connection?.edges?.[0]?.node
+
+    if (!data) {
     return null;
   }
   const owner = data?.user;

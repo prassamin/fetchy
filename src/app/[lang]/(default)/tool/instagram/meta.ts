@@ -22,5 +22,5 @@ export const frontmatter = {
     ko: "Instagram 동영상, 릴스 및 사진을 다운로드하세요.",
   },
   isNew: false,
-  updatedAt: "2026-07-05T22:26:36.878Z",
+  updatedAt: "2026-10-21T18:33:30.971Z",
 };

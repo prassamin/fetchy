@@ -29,7 +29,17 @@ export function withToolsMapper() {
 
       if (existsSync(configPath)) {
         const { config } = await import(configPath);
-        await startWatcher(config.dir);
+        if (isDev) {
+          await startWatcher(config.dir);
+        } else {
+          const pattern = `${config.dir}/**/*`;
+          const files = await glob(pattern);
+          await updateToolsMap(
+            files.filter((f) =>
+              expandBraces(ROOT_FILE).some((ending) => f.endsWith(ending))
+            )
+          );
+        }
       }
     }, 500);
   }

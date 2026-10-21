@@ -10,8 +10,12 @@ import { STAGE } from "./constants/env";
 import { routing } from "./i18n/routing";
 import createMiddleware from "next-intl/middleware";
 import { LOCALES_INFO, resolveLocale } from "./constants/locales";
-import { encodeBtoa } from "./utils";
 import { redenv } from "./lib/redenv";
+
+const encodeBtoa = (data: Record<string, any>) => {
+  const json = JSON.stringify(data);
+  return btoa(encodeURIComponent(json));
+};
 
 export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

@@ -36,9 +36,8 @@ const MD_EXTENSIONS = [".mdx", ".md"];
  */
 export function withFrontmatter({ dir, frequency }: WithFrontmatterOptions) {
   const isDev = process.argv.includes("dev");
-  const isBuild = process.argv.includes("build");
 
-  if ((isDev || isBuild) && process.env[WATCH_FLAG] !== "1") {
+  if (isDev && process.env[WATCH_FLAG] !== "1") {
     process.env[WATCH_FLAG] = "1";
     void startWatcher(dir, frequency);
   }

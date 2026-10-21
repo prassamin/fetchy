@@ -76,13 +76,14 @@ export const fetchFromGraphQL = async (
 ) => {
   if (!postId) return null;
   const env = await redenv.load();
+  const isPostOrReel = ["post", "reel"].includes(type);
 
-  const API_URL = "https://www.instagram.com/graphql/query";
+  const API_URL = isPostOrReel
+    ? `https://www.instagram.com/api/v1/media/${postId}/info/`
+    : "https://www.instagram.com/graphql/query";
 
   const csrfMatch = env.IG_COOKIE?.match(/csrftoken=([^;]+)/);
   const csrf = csrfMatch ? csrfMatch[1] : "G7hFiIknIPZGjEy26ig58NYV2F6D6D8E";
-
-  const isPostOrReel = ["post", "reel"].includes(type);
 
   const headers: Record<string, string> = {
     Accept: "*/*",
@@ -110,14 +111,14 @@ export const fetchFromGraphQL = async (
   try {
     const response = await HttpRequest({
       url: API_URL,
-      method: "POST",
+      method: isPostOrReel ? "GET" : "POST",
       headers,
-      data: encodedData,
+      data: isPostOrReel ? undefined : encodedData,
       timeout,
     });
 
     if (response && response.statusText !== "error") {
-      if (response.data?.data) {
+      if (typeof response.data === "object" && response.data !== null) {
         json = formatGraphqlJson(response.data, type);
       } else if (typeof response.data === "string") {
         json = extractWebInfoFromHtml(response.data);
